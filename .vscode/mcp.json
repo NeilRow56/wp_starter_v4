@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "Sentry": {
+      "url": "https://mcp.sentry.dev/mcp/none-pn3/wp_acc_pac",
+      "type": "http"
+    }
+  }
+}
