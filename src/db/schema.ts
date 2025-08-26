@@ -5,12 +5,35 @@ import {
   timestamp,
   boolean,
   pgEnum,
-  varchar
+  varchar,
+  integer
 } from 'drizzle-orm/pg-core'
 
 export const role = pgEnum('role', ['member', 'admin'])
 
 export type Role = (typeof role.enumValues)[number]
+
+export const sectionUnitCharges = [
+  'cost_revenue',
+  'wdv-b/fwd',
+  'w/off',
+  "dep'n_period_charge"
+] as const
+export type SectionUnitCharge = (typeof sectionUnitCharges)[number]
+export const sectionUnitChargeEnum = pgEnum(
+  'section_unit_charge',
+  sectionUnitCharges
+)
+
+export const entity_typeEnum = pgEnum('entity_type', [
+  'unassigned',
+  'sole_trader',
+  'partnership',
+  'small_limited_company',
+  'medium_limited_company'
+])
+
+// export type EntityType = (typeof entity_type.enumValues)[number]
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -80,6 +103,10 @@ export const clients = pgTable('clients', {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   name: varchar('name').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'restrict' }),
+  entity_type: entity_typeEnum('entity_type').notNull().default('unassigned'),
   owner: varchar('owner').notNull(),
   notes: text('notes'),
   active: boolean('active').notNull().default(true),
@@ -90,20 +117,30 @@ export const clients = pgTable('clients', {
     .$onUpdate(() => new Date())
 })
 
+export const ClientRelationships = relations(clients, ({ many, one }) => ({
+  accountinPeriods: many(accountsPeriod),
+  user: one(user, {
+    fields: [clients.userId],
+    references: [user.id]
+  })
+}))
+
+// Once created a client can have many accounting periods
+export type SelectClient = typeof clients.$inferSelect
+
+//Creating a client
+export type InsertClient = typeof clients.$inferInsert
+
 export const accountsPeriod = pgTable('accounts_period', {
   id: text('id')
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  clientId: text('client_id')
+  clientId: text('customer_id')
     .notNull()
     .references(() => clients.id),
-  debtorId: text('debtor_id')
-    .notNull()
-    .references(() => debtors.id),
-  periodHeading: varchar('period_heading').notNull(),
+  periodNumeric: varchar('period_numeric').notNull(),
   periodEnding: varchar('period_ending').notNull(),
   completed: boolean('completed').notNull().default(false),
-  member: varchar('member').notNull().default('unassigned'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at')
     .notNull()
@@ -111,29 +148,53 @@ export const accountsPeriod = pgTable('accounts_period', {
     .$onUpdate(() => new Date())
 })
 
-// Create relations
-export const clientsRelations = relations(clients, ({ many }) => ({
-  accountsPeriod: many(accountsPeriod)
-}))
+export type AccountingPeriod = typeof accountsPeriod.$inferSelect
 
-export const accountsPeriodRelations = relations(accountsPeriod, ({ one }) => ({
-  client: one(clients, {
-    fields: [accountsPeriod.clientId],
-    references: [clients.id]
-  }),
-  debtors: one(debtors, {
-    fields: [accountsPeriod.debtorId],
-    references: [debtors.id]
+export const accountsPeriodRelations = relations(
+  accountsPeriod,
+  ({ one, many }) => ({
+    client: one(clients, {
+      fields: [accountsPeriod.clientId],
+      references: [clients.id]
+    }),
+    accountsSections: many(accountsSection)
   })
-}))
+)
 
-export const debtors = pgTable('debtors', {
+// export const clientAccountsPeriodTable = pgTable('client_period', {
+//   clientId: text()
+//     .notNull()
+//     .references(() => clients.id, { onDelete: 'restrict' }),
+
+//   createdAt: timestamp('created_at').notNull().defaultNow(),
+//   updatedAt: timestamp('updated_at')
+//     .notNull()
+//     .defaultNow()
+//     .$onUpdate(() => new Date())
+// })
+
+// export const clientAccountsPeriodRelationships = relations(
+//   clientAccountsPeriodTable,
+//   ({ one, many }) => ({
+//     client: one(clients, {
+//       fields: [clientAccountsPeriodTable.clientId],
+//       references: [clients.id]
+//     }),
+//     accountsPeriods: many(accountsPeriod)
+//   })
+// )
+
+export const accountsSection = pgTable('accounts_section', {
   id: text('id')
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  accountsPeriodId: text('accounts_period_id')
+  accountsPeriodId: text()
     .notNull()
-    .references(() => clients.id),
+    .references(() => accountsPeriod.id, { onDelete: 'restrict' }),
+  name: varchar('name'),
+  category: varchar('category').notNull(),
+  description: varchar('name'),
+  amount: integer('amount').notNull(),
   completed: boolean('completed').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at')
@@ -142,12 +203,98 @@ export const debtors = pgTable('debtors', {
     .$onUpdate(() => new Date())
 })
 
-// Create relations
+export type AccountsSection = typeof accountsSection.$inferSelect
 
-export const debtorsRelations = relations(accountsPeriod, ({ one }) => ({
-  client: one(clients, {
-    fields: [accountsPeriod.clientId],
-    references: [clients.id]
+export const accountsSectionRelationships = relations(
+  accountsSection,
+  ({ many, one }) => ({
+    accountsPeriod: one(accountsPeriod, {
+      fields: [accountsSection.accountsPeriodId],
+      references: [accountsPeriod.id]
+    }),
+    section_breakdown: many(sectionBreakdown)
+  })
+)
+
+export const accountsPeriodSectionTable = pgTable('accounts_period_section', {
+  accountsPeriodId: text()
+    .notNull()
+    .references(() => accountsPeriod.id, { onDelete: 'restrict' }),
+  accountsSectionId: text()
+    .notNull()
+    .references(() => accountsSection.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at')
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date())
+})
+
+export const accountsPeriodSectionRelationships = relations(
+  accountsPeriodSectionTable,
+  ({ one }) => ({
+    accountsPeriod: one(accountsPeriod, {
+      fields: [accountsPeriodSectionTable.accountsPeriodId],
+      references: [accountsPeriod.id]
+    }),
+    accountsSection: one(accountsSection, {
+      fields: [accountsPeriodSectionTable.accountsSectionId],
+      references: [accountsSection.id]
+    })
+  })
+)
+
+export const sectionBreakdown = pgTable('section_breakdown', {
+  id: text('id')
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  name: text().notNull(),
+  amount: integer('amount').notNull(),
+  description: text(),
+  sectionId: text()
+    .notNull()
+    .references(() => accountsSection.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at')
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date())
+})
+
+export type SectionBreakdown = typeof sectionBreakdown.$inferSelect
+
+export const sectionBrakdownRelationships = relations(
+  sectionBreakdown,
+  ({ one }) => ({
+    section: one(accountsSection, {
+      fields: [sectionBreakdown.sectionId],
+      references: [accountsSection.id]
+    })
+  })
+)
+export const sectionUnit = pgTable('section_unit', {
+  id: text('id')
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  chargeDetails: sectionUnitChargeEnum().notNull().default('cost_revenue'),
+  AmountInPounds: integer('value').notNull(),
+  description: text(),
+  sectionBreakdownId: text()
+    .notNull()
+    .references(() => sectionBreakdown.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at')
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date())
+})
+
+export type SectionUnit = typeof sectionUnit.$inferSelect
+
+export const sectionUnitRelationships = relations(sectionUnit, ({ one }) => ({
+  section: one(sectionBreakdown, {
+    fields: [sectionUnit.sectionBreakdownId],
+    references: [sectionBreakdown.id]
   })
 }))
 
@@ -214,13 +361,20 @@ export const schema = {
   verification,
   clients,
   accountsPeriod,
-  clientsRelations,
   accountsPeriodRelations,
+  // clientAccountsPeriodTable,
+  // clientAccountsPeriodRelationships,
+  accountsSection,
+  accountsSectionRelationships,
+  accountsPeriodSectionTable,
+  accountsPeriodSectionRelationships,
+  sectionBreakdown,
+  sectionBrakdownRelationships,
+  sectionUnit,
+  sectionUnitRelationships,
   organization,
   member,
   invitation,
   organizationRelations,
-  memberRelations,
-  debtors,
-  debtorsRelations
+  memberRelations
 }
